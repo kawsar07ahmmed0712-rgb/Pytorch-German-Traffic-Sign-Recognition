@@ -1,16 +1,45 @@
-# src/helper_functions.py
+"""
+Helper functions for the GTSRB PyTorch project.
+
+This file contains only reusable support utilities such as:
+- reproducibility helpers
+- path/dataframe helpers
+- Excel table saving helpers
+- visualization helpers
+- split checking helpers
+- evaluation helpers
+
+Core PyTorch learning code such as transforms, Dataset classes, model
+architectures, loss functions, optimizers, and training-loop explanations
+should stay in the notebook unless they become reusable later.
+"""
+
+# =============================================================================
+# 0. Imports
+# =============================================================================
 
 from pathlib import Path
 import random
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
+from PIL import Image
+from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.model_selection import StratifiedGroupKFold
 
+
+# =============================================================================
+# 1. Reproducibility and Project Folder Helpers
+# =============================================================================
 
 def set_seeds(seed: int = 42) -> torch.Generator:
     """
     Set random seeds for reproducibility.
+
+    Args:
+        seed: Random seed value.
 
     Returns:
         torch.Generator: A seeded generator that can be used in DataLoader.
@@ -32,10 +61,17 @@ def set_seeds(seed: int = 42) -> torch.Generator:
 def make_project_dirs(*paths: Path) -> None:
     """
     Create project directories if they do not already exist.
+
+    Args:
+        *paths: One or more folder paths to create.
     """
     for path in paths:
         Path(path).mkdir(parents=True, exist_ok=True)
 
+
+# =============================================================================
+# 2. GTSRB CSV and Path Helpers
+# =============================================================================
 
 def load_gtsrb_csvs(data_dir: Path):
     """
@@ -54,7 +90,11 @@ def load_gtsrb_csvs(data_dir: Path):
     return train_df, test_df, meta_df
 
 
-def add_full_image_path(df: pd.DataFrame, data_dir: Path, path_col: str = "Path") -> pd.DataFrame:
+def add_full_image_path(
+    df: pd.DataFrame,
+    data_dir: Path,
+    path_col: str = "Path"
+) -> pd.DataFrame:
     """
     Add a full image path column using the dataset path column.
 
@@ -68,6 +108,7 @@ def add_full_image_path(df: pd.DataFrame, data_dir: Path, path_col: str = "Path"
     """
     df = df.copy()
     df["full_path"] = df[path_col].apply(lambda x: str(data_dir / x))
+
     return df
 
 
@@ -80,6 +121,12 @@ def extract_track_id(path: str) -> str:
         track_id -> 00020_00000
 
     This helps us later check whether grouped validation splitting is possible.
+
+    Args:
+        path: Relative or full image path.
+
+    Returns:
+        Extracted track ID.
     """
     stem = Path(path).stem
     parts = stem.split("_")
@@ -90,7 +137,11 @@ def extract_track_id(path: str) -> str:
     return stem
 
 
-def check_path_exists(df: pd.DataFrame, path_col: str = "full_path", n: int = 10) -> pd.DataFrame:
+def check_path_exists(
+    df: pd.DataFrame,
+    path_col: str = "full_path",
+    n: int = 10
+) -> pd.DataFrame:
     """
     Check whether sample image paths exist.
 
@@ -104,65 +155,13 @@ def check_path_exists(df: pd.DataFrame, path_col: str = "full_path", n: int = 10
     """
     sample_df = df[[path_col]].head(n).copy()
     sample_df["exists"] = sample_df[path_col].apply(lambda x: Path(x).exists())
+
     return sample_df
 
 
-
-
-### Plotting funcitons
-
-
-import matplotlib.pyplot as plt
-
-
-def get_class_distribution(df: pd.DataFrame, label_col: str = "ClassId") -> pd.DataFrame:
-    """
-    Create a class distribution table.
-
-    Args:
-        df: Input dataframe.
-        label_col: Column containing class labels.
-
-    Returns:
-        DataFrame with class id and image count.
-    """
-    class_counts = (
-        df[label_col]
-        .value_counts()
-        .sort_index()
-        .reset_index()
-    )
-
-    class_counts.columns = [label_col, "image_count"]
-    return class_counts
-
-
-def plot_class_distribution(
-    class_counts: pd.DataFrame,
-    label_col: str = "ClassId",
-    count_col: str = "image_count",
-    title: str = "Class Distribution",
-    figsize: tuple = (14, 5)
-):
-    """
-    Plot class distribution as a bar chart.
-
-    Args:
-        class_counts: DataFrame containing class labels and counts.
-        label_col: Class label column name.
-        count_col: Count column name.
-        title: Plot title.
-        figsize: Figure size.
-    """
-    plt.figure(figsize=figsize)
-    plt.bar(class_counts[label_col].astype(str), class_counts[count_col])
-    plt.title(title)
-    plt.xlabel("Class ID")
-    plt.ylabel("Number of Images")
-    plt.xticks(rotation=90)
-    plt.tight_layout()
-    plt.show()
-
+# =============================================================================
+# 3. Excel Report Helpers
+# =============================================================================
 
 def clean_sheet_name(name: str) -> str:
     """
@@ -170,6 +169,12 @@ def clean_sheet_name(name: str) -> str:
 
     Excel sheet names cannot be longer than 31 characters and cannot contain
     some special characters.
+
+    Args:
+        name: Original sheet name.
+
+    Returns:
+        Excel-safe sheet name.
     """
     invalid_chars = ["\\", "/", "*", "?", ":", "[", "]"]
 
@@ -182,6 +187,8 @@ def clean_sheet_name(name: str) -> str:
 def save_tables_to_excel(tables: dict, file_path: Path) -> None:
     """
     Save multiple small pandas DataFrames into one Excel workbook.
+
+    This function creates a new workbook and overwrites any existing file.
 
     Args:
         tables: Dictionary where keys are sheet names and values are DataFrames.
@@ -244,8 +251,61 @@ def save_or_update_tables_to_excel(tables: dict, file_path: Path) -> None:
     print(f"Saved or updated {len(tables)} tables to: {file_path}")
 
 
+# =============================================================================
+# 4. Class Distribution and Image Size Helpers
+# =============================================================================
+
+def get_class_distribution(
+    df: pd.DataFrame,
+    label_col: str = "ClassId"
+) -> pd.DataFrame:
+    """
+    Create a class distribution table.
+
+    Args:
+        df: Input dataframe.
+        label_col: Column containing class labels.
+
+    Returns:
+        DataFrame with class id and image count.
+    """
+    class_counts = (
+        df[label_col]
+        .value_counts()
+        .sort_index()
+        .reset_index()
+    )
+
+    class_counts.columns = [label_col, "image_count"]
+
+    return class_counts
 
 
+def plot_class_distribution(
+    class_counts: pd.DataFrame,
+    label_col: str = "ClassId",
+    count_col: str = "image_count",
+    title: str = "Class Distribution",
+    figsize: tuple = (14, 5)
+):
+    """
+    Plot class distribution as a bar chart.
+
+    Args:
+        class_counts: DataFrame containing class labels and counts.
+        label_col: Class label column name.
+        count_col: Count column name.
+        title: Plot title.
+        figsize: Figure size.
+    """
+    plt.figure(figsize=figsize)
+    plt.bar(class_counts[label_col].astype(str), class_counts[count_col])
+    plt.title(title)
+    plt.xlabel("Class ID")
+    plt.ylabel("Number of Images")
+    plt.xticks(rotation=90)
+    plt.tight_layout()
+    plt.show()
 
 
 def get_image_size_summary(df: pd.DataFrame) -> dict:
@@ -271,7 +331,11 @@ def get_image_size_summary(df: pd.DataFrame) -> dict:
         "size_summary": size_summary,
         "most_common_sizes": unique_sizes.head(20),
         "unique_size_count": pd.DataFrame({
-            "metric": ["unique_widths", "unique_heights", "unique_width_height_pairs"],
+            "metric": [
+                "unique_widths",
+                "unique_heights",
+                "unique_width_height_pairs",
+            ],
             "value": [
                 df["Width"].nunique(),
                 df["Height"].nunique(),
@@ -305,9 +369,9 @@ def plot_image_size_distribution(
     plt.show()
 
 
-
-from PIL import Image
-
+# =============================================================================
+# 5. Image Visualization Helpers
+# =============================================================================
 
 def show_random_images(
     df: pd.DataFrame,
@@ -399,10 +463,55 @@ def show_one_image_per_class(
     plt.show()
 
 
+def show_original_and_transformed_images(
+    df: pd.DataFrame,
+    transform,
+    image_col: str = "full_path",
+    label_col: str = "ClassId",
+    n: int = 6,
+    seed: int = 42,
+    figsize: tuple = (12, 5)
+):
+    """
+    Show original and transformed images side by side.
+
+    This is only a visualization helper.
+    The transform itself should be defined in the notebook.
+
+    Args:
+        df: DataFrame containing image paths and labels.
+        transform: Torchvision transform defined in the notebook.
+        image_col: Column containing full image paths.
+        label_col: Column containing class labels.
+        n: Number of images to show.
+        seed: Random seed.
+        figsize: Figure size.
+    """
+    sample_df = df.sample(n=n, random_state=seed).reset_index(drop=True)
+
+    plt.figure(figsize=figsize)
+
+    for i, row in sample_df.iterrows():
+        image = Image.open(row[image_col]).convert("RGB")
+        transformed_image = transform(image)
+
+        plt.subplot(2, n, i + 1)
+        plt.imshow(image)
+        plt.title(f"Original\nClass {row[label_col]}")
+        plt.axis("off")
+
+        plt.subplot(2, n, i + 1 + n)
+        plt.imshow(transformed_image.permute(1, 2, 0))
+        plt.title(f"Transformed\n{tuple(transformed_image.shape)}")
+        plt.axis("off")
+
+    plt.tight_layout()
+    plt.show()
 
 
-from sklearn.model_selection import StratifiedGroupKFold
-
+# =============================================================================
+# 6. Train/Validation Split Helpers
+# =============================================================================
 
 def create_grouped_train_valid_split(
     df: pd.DataFrame,
@@ -472,17 +581,17 @@ def check_split_quality(
         "num_images": [len(train_split_df), len(valid_split_df)],
         "num_classes": [
             train_split_df[label_col].nunique(),
-            valid_split_df[label_col].nunique()
+            valid_split_df[label_col].nunique(),
         ],
         "num_groups": [
             train_split_df[group_col].nunique(),
-            valid_split_df[group_col].nunique()
+            valid_split_df[group_col].nunique(),
         ],
     })
 
     leakage_check = pd.DataFrame({
         "metric": ["overlapping_groups"],
-        "value": [len(overlap_groups)]
+        "value": [len(overlap_groups)],
     })
 
     train_class_counts = get_class_distribution(train_split_df, label_col=label_col)
@@ -506,52 +615,17 @@ def check_split_quality(
     }
 
 
-from torchvision import transforms
-
-from PIL import Image
-
-
-def show_original_and_transformed_images(
-    df: pd.DataFrame,
-    transform,
-    image_col: str = "full_path",
-    label_col: str = "ClassId",
-    n: int = 6,
-    seed: int = 42,
-    figsize: tuple = (12, 5)
-):
-    """
-    Show original and transformed images side by side.
-
-    This is only a visualization helper.
-    The transform itself should be defined in the notebook.
-    """
-    sample_df = df.sample(n=n, random_state=seed).reset_index(drop=True)
-
-    plt.figure(figsize=figsize)
-
-    for i, row in sample_df.iterrows():
-        image = Image.open(row[image_col]).convert("RGB")
-        transformed_image = transform(image)
-
-        plt.subplot(2, n, i + 1)
-        plt.imshow(image)
-        plt.title(f"Original\nClass {row[label_col]}")
-        plt.axis("off")
-
-        plt.subplot(2, n, i + 1 + n)
-        plt.imshow(transformed_image.permute(1, 2, 0))
-        plt.title(f"Transformed\n{tuple(transformed_image.shape)}")
-        plt.axis("off")
-
-    plt.tight_layout()
-    plt.show()
-
-
+# =============================================================================
+# 7. Training Result Plotting Helpers
+# =============================================================================
 
 def plot_training_curves(results: dict, figsize: tuple = (12, 4)):
     """
     Plot training and validation loss/accuracy curves.
+
+    Args:
+        results: Dictionary with train_loss, valid_loss, train_acc, valid_acc.
+        figsize: Figure size.
     """
     epochs = range(1, len(results["train_loss"]) + 1)
 
@@ -577,6 +651,9 @@ def plot_training_curves(results: dict, figsize: tuple = (12, 4)):
     plt.show()
 
 
+# =============================================================================
+# 8. Model Prediction and Evaluation Helpers
+# =============================================================================
 
 def get_model_predictions(model, dataloader, device):
     """
@@ -615,9 +692,6 @@ def get_model_predictions(model, dataloader, device):
     return y_true, y_pred, y_prob
 
 
-from sklearn.metrics import confusion_matrix
-
-
 def create_confusion_matrix_df(y_true, y_pred, class_ids):
     """
     Create a confusion matrix as a pandas DataFrame.
@@ -635,7 +709,7 @@ def create_confusion_matrix_df(y_true, y_pred, class_ids):
     cm_df = pd.DataFrame(
         cm,
         index=[f"true_{class_id}" for class_id in class_ids],
-        columns=[f"pred_{class_id}" for class_id in class_ids]
+        columns=[f"pred_{class_id}" for class_id in class_ids],
     )
 
     return cm_df
@@ -657,11 +731,11 @@ def plot_confusion_matrix_df(cm_df, figsize=(14, 12)):
     plt.xticks(
         ticks=range(len(cm_df.columns)),
         labels=[col.replace("pred_", "") for col in cm_df.columns],
-        rotation=90
+        rotation=90,
     )
     plt.yticks(
         ticks=range(len(cm_df.index)),
-        labels=[idx.replace("true_", "") for idx in cm_df.index]
+        labels=[idx.replace("true_", "") for idx in cm_df.index],
     )
     plt.colorbar(label="Number of Images")
     plt.tight_layout()
@@ -683,14 +757,17 @@ def get_most_confused_classes(cm_df, top_n=15):
 
     for true_label in cm_df.index:
         for pred_label in cm_df.columns:
-            if true_label.replace("true_", "") != pred_label.replace("pred_", ""):
+            true_class = true_label.replace("true_", "")
+            predicted_class = pred_label.replace("pred_", "")
+
+            if true_class != predicted_class:
                 count = cm_df.loc[true_label, pred_label]
 
                 if count > 0:
                     confusion_records.append({
-                        "true_class": true_label.replace("true_", ""),
-                        "predicted_class": pred_label.replace("pred_", ""),
-                        "count": count
+                        "true_class": true_class,
+                        "predicted_class": predicted_class,
+                        "count": count,
                     })
 
     confused_df = pd.DataFrame(confusion_records)
@@ -698,13 +775,12 @@ def get_most_confused_classes(cm_df, top_n=15):
     if len(confused_df) == 0:
         return confused_df
 
-    confused_df = confused_df.sort_values("count", ascending=False).reset_index(drop=True)
+    confused_df = confused_df.sort_values(
+        "count",
+        ascending=False
+    ).reset_index(drop=True)
 
     return confused_df.head(top_n)
-
-
-
-from sklearn.metrics import classification_report
 
 
 def create_classification_report_df(y_true, y_pred):
@@ -754,7 +830,7 @@ def create_per_class_accuracy_df(y_true, y_pred):
         .agg(
             total_images=("correct", "count"),
             correct_predictions=("correct", "sum"),
-            accuracy=("correct", "mean")
+            accuracy=("correct", "mean"),
         )
         .reset_index()
         .sort_values("accuracy")
@@ -793,7 +869,12 @@ def show_wrong_predictions(
         figsize: Figure size.
     """
     if sort_by_confidence:
-        sample_df = wrong_df.sort_values(conf_col, ascending=ascending).head(n).reset_index(drop=True)
+        sample_df = (
+            wrong_df
+            .sort_values(conf_col, ascending=ascending)
+            .head(n)
+            .reset_index(drop=True)
+        )
     else:
         sample_df = wrong_df.sample(n=n, random_state=seed).reset_index(drop=True)
 
@@ -807,7 +888,8 @@ def show_wrong_predictions(
         plt.subplot(rows, cols, i + 1)
         plt.imshow(image)
         plt.title(
-            f"True: {row[true_col]} | Pred: {row[pred_col]}\nConf: {row[conf_col]:.2f}"
+            f"True: {row[true_col]} | Pred: {row[pred_col]}\n"
+            f"Conf: {row[conf_col]:.2f}"
         )
         plt.axis("off")
 
