@@ -546,3 +546,270 @@ def show_original_and_transformed_images(
 
     plt.tight_layout()
     plt.show()
+
+
+
+def plot_training_curves(results: dict, figsize: tuple = (12, 4)):
+    """
+    Plot training and validation loss/accuracy curves.
+    """
+    epochs = range(1, len(results["train_loss"]) + 1)
+
+    plt.figure(figsize=figsize)
+
+    plt.subplot(1, 2, 1)
+    plt.plot(epochs, results["train_loss"], label="Train loss")
+    plt.plot(epochs, results["valid_loss"], label="Valid loss")
+    plt.title("Loss Curves")
+    plt.xlabel("Epoch")
+    plt.ylabel("Loss")
+    plt.legend()
+
+    plt.subplot(1, 2, 2)
+    plt.plot(epochs, results["train_acc"], label="Train accuracy")
+    plt.plot(epochs, results["valid_acc"], label="Valid accuracy")
+    plt.title("Accuracy Curves")
+    plt.xlabel("Epoch")
+    plt.ylabel("Accuracy")
+    plt.legend()
+
+    plt.tight_layout()
+    plt.show()
+
+
+
+def get_model_predictions(model, dataloader, device):
+    """
+    Get predictions, true labels, and prediction probabilities from a model.
+
+    Args:
+        model: Trained PyTorch model.
+        dataloader: DataLoader for prediction.
+        device: Target device.
+
+    Returns:
+        y_true, y_pred, y_prob
+    """
+    model.eval()
+
+    y_true = []
+    y_pred = []
+    y_prob = []
+
+    with torch.inference_mode():
+        for X, y in dataloader:
+            X = X.to(device)
+
+            logits = model(X)
+            probs = torch.softmax(logits, dim=1)
+            preds = torch.argmax(probs, dim=1)
+
+            y_true.append(y.cpu())
+            y_pred.append(preds.cpu())
+            y_prob.append(probs.cpu())
+
+    y_true = torch.cat(y_true)
+    y_pred = torch.cat(y_pred)
+    y_prob = torch.cat(y_prob)
+
+    return y_true, y_pred, y_prob
+
+
+from sklearn.metrics import confusion_matrix
+
+
+def create_confusion_matrix_df(y_true, y_pred, class_ids):
+    """
+    Create a confusion matrix as a pandas DataFrame.
+
+    Args:
+        y_true: True labels.
+        y_pred: Predicted labels.
+        class_ids: List of class IDs.
+
+    Returns:
+        Confusion matrix DataFrame.
+    """
+    cm = confusion_matrix(y_true, y_pred, labels=class_ids)
+
+    cm_df = pd.DataFrame(
+        cm,
+        index=[f"true_{class_id}" for class_id in class_ids],
+        columns=[f"pred_{class_id}" for class_id in class_ids]
+    )
+
+    return cm_df
+
+
+def plot_confusion_matrix_df(cm_df, figsize=(14, 12)):
+    """
+    Plot a confusion matrix DataFrame.
+
+    Args:
+        cm_df: Confusion matrix DataFrame.
+        figsize: Figure size.
+    """
+    plt.figure(figsize=figsize)
+    plt.imshow(cm_df.values)
+    plt.title("Confusion Matrix")
+    plt.xlabel("Predicted Class")
+    plt.ylabel("True Class")
+    plt.xticks(
+        ticks=range(len(cm_df.columns)),
+        labels=[col.replace("pred_", "") for col in cm_df.columns],
+        rotation=90
+    )
+    plt.yticks(
+        ticks=range(len(cm_df.index)),
+        labels=[idx.replace("true_", "") for idx in cm_df.index]
+    )
+    plt.colorbar(label="Number of Images")
+    plt.tight_layout()
+    plt.show()
+
+
+def get_most_confused_classes(cm_df, top_n=15):
+    """
+    Get the most common off-diagonal confusion pairs.
+
+    Args:
+        cm_df: Confusion matrix DataFrame.
+        top_n: Number of confusion pairs to return.
+
+    Returns:
+        DataFrame with most confused class pairs.
+    """
+    confusion_records = []
+
+    for true_label in cm_df.index:
+        for pred_label in cm_df.columns:
+            if true_label.replace("true_", "") != pred_label.replace("pred_", ""):
+                count = cm_df.loc[true_label, pred_label]
+
+                if count > 0:
+                    confusion_records.append({
+                        "true_class": true_label.replace("true_", ""),
+                        "predicted_class": pred_label.replace("pred_", ""),
+                        "count": count
+                    })
+
+    confused_df = pd.DataFrame(confusion_records)
+
+    if len(confused_df) == 0:
+        return confused_df
+
+    confused_df = confused_df.sort_values("count", ascending=False).reset_index(drop=True)
+
+    return confused_df.head(top_n)
+
+
+
+from sklearn.metrics import classification_report
+
+
+def create_classification_report_df(y_true, y_pred):
+    """
+    Create a classification report as a pandas DataFrame.
+
+    Args:
+        y_true: True labels.
+        y_pred: Predicted labels.
+
+    Returns:
+        Classification report DataFrame.
+    """
+    report = classification_report(
+        y_true,
+        y_pred,
+        output_dict=True,
+        zero_division=0
+    )
+
+    report_df = pd.DataFrame(report).transpose().reset_index()
+    report_df = report_df.rename(columns={"index": "class_or_metric"})
+
+    return report_df
+
+
+def create_per_class_accuracy_df(y_true, y_pred):
+    """
+    Create per-class accuracy table.
+
+    Args:
+        y_true: True labels.
+        y_pred: Predicted labels.
+
+    Returns:
+        DataFrame with per-class accuracy.
+    """
+    y_true_series = pd.Series(y_true, name="true_class")
+    y_pred_series = pd.Series(y_pred, name="predicted_class")
+
+    eval_df = pd.concat([y_true_series, y_pred_series], axis=1)
+    eval_df["correct"] = eval_df["true_class"] == eval_df["predicted_class"]
+
+    per_class_acc = (
+        eval_df
+        .groupby("true_class")
+        .agg(
+            total_images=("correct", "count"),
+            correct_predictions=("correct", "sum"),
+            accuracy=("correct", "mean")
+        )
+        .reset_index()
+        .sort_values("accuracy")
+    )
+
+    return per_class_acc
+
+
+def show_wrong_predictions(
+    wrong_df: pd.DataFrame,
+    image_col: str = "full_path",
+    true_col: str = "true_class",
+    pred_col: str = "predicted_class",
+    conf_col: str = "confidence",
+    n: int = 16,
+    sort_by_confidence: bool = True,
+    ascending: bool = False,
+    seed: int = 42,
+    cols: int = 4,
+    figsize: tuple = (12, 12)
+):
+    """
+    Show wrong prediction images with true label, predicted label, and confidence.
+
+    Args:
+        wrong_df: DataFrame containing wrong predictions.
+        image_col: Column containing image paths.
+        true_col: Column containing true labels.
+        pred_col: Column containing predicted labels.
+        conf_col: Column containing prediction confidence.
+        n: Number of images to show.
+        sort_by_confidence: Whether to sort by confidence before selecting images.
+        ascending: Sort order for confidence.
+        seed: Random seed if not sorting by confidence.
+        cols: Number of columns in the plot.
+        figsize: Figure size.
+    """
+    if sort_by_confidence:
+        sample_df = wrong_df.sort_values(conf_col, ascending=ascending).head(n).reset_index(drop=True)
+    else:
+        sample_df = wrong_df.sample(n=n, random_state=seed).reset_index(drop=True)
+
+    rows = int(np.ceil(n / cols))
+
+    plt.figure(figsize=figsize)
+
+    for i, row in sample_df.iterrows():
+        image = Image.open(row[image_col]).convert("RGB")
+
+        plt.subplot(rows, cols, i + 1)
+        plt.imshow(image)
+        plt.title(
+            f"True: {row[true_col]} | Pred: {row[pred_col]}\nConf: {row[conf_col]:.2f}"
+        )
+        plt.axis("off")
+
+    plt.tight_layout()
+    plt.show()
