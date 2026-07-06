@@ -504,3 +504,45 @@ def check_split_quality(
         "leakage_check": leakage_check,
         "split_class_balance": class_balance,
     }
+
+
+from torchvision import transforms
+
+from PIL import Image
+
+
+def show_original_and_transformed_images(
+    df: pd.DataFrame,
+    transform,
+    image_col: str = "full_path",
+    label_col: str = "ClassId",
+    n: int = 6,
+    seed: int = 42,
+    figsize: tuple = (12, 5)
+):
+    """
+    Show original and transformed images side by side.
+
+    This is only a visualization helper.
+    The transform itself should be defined in the notebook.
+    """
+    sample_df = df.sample(n=n, random_state=seed).reset_index(drop=True)
+
+    plt.figure(figsize=figsize)
+
+    for i, row in sample_df.iterrows():
+        image = Image.open(row[image_col]).convert("RGB")
+        transformed_image = transform(image)
+
+        plt.subplot(2, n, i + 1)
+        plt.imshow(image)
+        plt.title(f"Original\nClass {row[label_col]}")
+        plt.axis("off")
+
+        plt.subplot(2, n, i + 1 + n)
+        plt.imshow(transformed_image.permute(1, 2, 0))
+        plt.title(f"Transformed\n{tuple(transformed_image.shape)}")
+        plt.axis("off")
+
+    plt.tight_layout()
+    plt.show()
