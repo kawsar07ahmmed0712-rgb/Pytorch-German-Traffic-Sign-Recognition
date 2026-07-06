@@ -397,3 +397,110 @@ def show_one_image_per_class(
 
     plt.tight_layout()
     plt.show()
+
+
+
+
+from sklearn.model_selection import StratifiedGroupKFold
+
+
+def create_grouped_train_valid_split(
+    df: pd.DataFrame,
+    label_col: str = "ClassId",
+    group_col: str = "track_id",
+    n_splits: int = 5,
+    seed: int = 42
+):
+    """
+    Create a train/validation split using StratifiedGroupKFold.
+
+    This tries to keep class distribution balanced while also making sure
+    the same group does not appear in both train and validation.
+
+    Args:
+        df: Input dataframe.
+        label_col: Target label column.
+        group_col: Group column used to prevent leakage.
+        n_splits: Number of folds. 5 means about 80/20 split.
+        seed: Random seed.
+
+    Returns:
+        train_split_df, valid_split_df
+    """
+    splitter = StratifiedGroupKFold(
+        n_splits=n_splits,
+        shuffle=True,
+        random_state=seed
+    )
+
+    X = df
+    y = df[label_col]
+    groups = df[group_col]
+
+    train_idx, valid_idx = next(splitter.split(X, y, groups))
+
+    train_split_df = df.iloc[train_idx].reset_index(drop=True)
+    valid_split_df = df.iloc[valid_idx].reset_index(drop=True)
+
+    return train_split_df, valid_split_df
+
+
+def check_split_quality(
+    train_split_df: pd.DataFrame,
+    valid_split_df: pd.DataFrame,
+    label_col: str = "ClassId",
+    group_col: str = "track_id"
+) -> dict:
+    """
+    Create summary tables to check train/validation split quality.
+
+    Args:
+        train_split_df: Training split dataframe.
+        valid_split_df: Validation split dataframe.
+        label_col: Target label column.
+        group_col: Group column.
+
+    Returns:
+        Dictionary of summary DataFrames.
+    """
+    train_groups = set(train_split_df[group_col].unique())
+    valid_groups = set(valid_split_df[group_col].unique())
+    overlap_groups = train_groups.intersection(valid_groups)
+
+    split_overview = pd.DataFrame({
+        "split": ["train", "valid"],
+        "num_images": [len(train_split_df), len(valid_split_df)],
+        "num_classes": [
+            train_split_df[label_col].nunique(),
+            valid_split_df[label_col].nunique()
+        ],
+        "num_groups": [
+            train_split_df[group_col].nunique(),
+            valid_split_df[group_col].nunique()
+        ],
+    })
+
+    leakage_check = pd.DataFrame({
+        "metric": ["overlapping_groups"],
+        "value": [len(overlap_groups)]
+    })
+
+    train_class_counts = get_class_distribution(train_split_df, label_col=label_col)
+    valid_class_counts = get_class_distribution(valid_split_df, label_col=label_col)
+
+    class_balance = train_class_counts.merge(
+        valid_class_counts,
+        on=label_col,
+        suffixes=("_train", "_valid")
+    )
+
+    class_balance["valid_ratio"] = (
+        class_balance["image_count_valid"] /
+        (class_balance["image_count_train"] + class_balance["image_count_valid"])
+    )
+
+    return {
+        "split_overview": split_overview,
+        "leakage_check": leakage_check,
+        "split_class_balance": class_balance,
+    }
